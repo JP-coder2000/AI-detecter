@@ -162,7 +162,8 @@ class PanCorpusLoader:
                     tree = ET.parse(file_path)
                     root = tree.getroot()
                     
-                    for feature in root.findall('.//feature'):
+                    # CORRECCIÓN: Buscar específicamente elementos con name="plagiarism"
+                    for feature in root.findall('.//feature[@name="plagiarism"]'):
                         try:
                             # Obtener atributos con manejo seguro
                             this_offset = feature.get('this_offset')

@@ -3,9 +3,9 @@ from typing import Dict, List, Tuple, Any, Union
 import joblib
 import os
 
-from src.models.svm_model import PlagiarismSVM
-from src.models.cnn_model import PlagiarismCNN
-from src.features.feature_extractor import FeatureExtractor
+from models.svm_model import PlagiarismSVM
+from models.cnn_model import PlagiarismCNN
+from features.feature_extractor import FeatureExtractor
 
 class HybridPlagiarismDetector:
     def __init__(self, svm_model: PlagiarismSVM = None, 
@@ -103,16 +103,16 @@ class HybridPlagiarismDetector:
         os.makedirs(directory, exist_ok=True)
         
         # Guardar SVM
-        joblib.dump(self.svm_model, os.path.join(directory, 'svm_model.pkl'))
+        joblib.dump(self.svm_model, os.path.join(directory, 'svm_model.keras'))
         
         # Guardar CNN
-        self.cnn_model.save(os.path.join(directory, 'cnn_model'))
+        self.cnn_model.save(os.path.join(directory, 'cnn_model.keras'))
         
         # Guardar extractor de características
-        joblib.dump(self.feature_extractor, os.path.join(directory, 'feature_extractor.pkl'))
+        joblib.dump(self.feature_extractor, os.path.join(directory, 'feature_extractor.keras'))
         
         # Guardar pesos de ensamble
-        joblib.dump(self.ensemble_weights, os.path.join(directory, 'ensemble_weights.pkl'))
+        joblib.dump(self.ensemble_weights, os.path.join(directory, 'ensemble_weights.keras'))
     
     @classmethod
     def load(cls, directory: str):
@@ -126,16 +126,16 @@ class HybridPlagiarismDetector:
             Modelo híbrido cargado
         """
         # Cargar SVM
-        svm_model = joblib.load(os.path.join(directory, 'svm_model.pkl'))
+        svm_model = joblib.load(os.path.join(directory, 'svm_model.keras'))
         
         # Cargar CNN
         cnn_model = PlagiarismCNN.load(os.path.join(directory, 'cnn_model'))
         
         # Cargar extractor de características
-        feature_extractor = joblib.load(os.path.join(directory, 'feature_extractor.pkl'))
+        feature_extractor = joblib.load(os.path.join(directory, 'feature_extractor.keras'))
         
         # Cargar pesos de ensamble
-        ensemble_weights = joblib.load(os.path.join(directory, 'ensemble_weights.pkl'))
+        ensemble_weights = joblib.load(os.path.join(directory, 'ensemble_weights.keras'))
         
         return cls(
             svm_model=svm_model,

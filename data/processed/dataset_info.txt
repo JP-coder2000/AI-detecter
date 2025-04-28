@@ -1,0 +1,5 @@
+Total examples: 500
+Positive examples: 250
+Negative examples: 250
+SVM features dimension: 8
+CNN sequence length: 500
