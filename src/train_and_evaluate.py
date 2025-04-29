@@ -10,14 +10,21 @@ import joblib
 from models.svm_model import PlagiarismSVM
 from models.cnn_model import PlagiarismCNN
 from integration.hybrid_model import HybridPlagiarismDetector
+from features.feature_extractor import FeatureExtractor
 
-def train_and_evaluate(data_dir='data/processed', model_dir='models'):
+def train_and_evaluate(data_dir='data/processed', model_dir='models',
+                      use_pretrained_embeddings=True,
+                      embedding_model='glove-wiki-gigaword-300',
+                      language='english'):
     """
     Entrena y evalúa los modelos con el dataset generado.
     
     Args:
         data_dir: Directorio con los datos procesados
         model_dir: Directorio donde guardar los modelos
+        use_pretrained_embeddings: Si se deben usar embeddings preentrenados
+        embedding_model: Modelo de embeddings a utilizar
+        language: Idioma del modelo
     """
     print("Cargando datos...")
     X_svm_train = np.load(os.path.join(data_dir, 'X_svm_train.npy'))
@@ -33,6 +40,26 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models'):
     metadata_test = pd.read_csv(os.path.join(data_dir, 'metadata_test.csv'))
     
     print(f"Datos cargados: {len(y_train)} ejemplos de entrenamiento, {len(y_test)} de prueba")
+    
+    # Cargar vocabulario y feature_extractor
+    vocab_path = os.path.join(data_dir, 'vocabulary.pkl')
+    feature_extractor = None
+    
+    if os.path.exists(vocab_path):
+        print(f"Cargando vocabulario existente desde {vocab_path}")
+        feature_extractor = FeatureExtractor(
+            language=language,
+            use_pretrained_embeddings=use_pretrained_embeddings,
+            embedding_model=embedding_model
+        )
+        feature_extractor.load_vocabulary(vocab_path)
+    else:
+        print("¡ADVERTENCIA! No se encontró vocabulario. Esto puede causar problemas con embeddings preentrenados.")
+        feature_extractor = FeatureExtractor(
+            language=language,
+            use_pretrained_embeddings=use_pretrained_embeddings,
+            embedding_model=embedding_model
+        )
     
     # Crear directorio para modelos
     os.makedirs(model_dir, exist_ok=True)
@@ -59,31 +86,81 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models'):
     
     print(f"Parámetros CNN: vocab_size={vocab_size}, max_length={max_length}")
     
+    # IMPORTANTE: Cargar la matriz de embeddings si existe
+    embedding_matrix = None
+    embedding_matrix_path = os.path.join(data_dir, 'embedding_matrix.npy')
+    
+    if os.path.exists(embedding_matrix_path) and use_pretrained_embeddings:
+        print(f"Cargando matriz de embeddings desde {embedding_matrix_path}")
+        embedding_matrix = np.load(embedding_matrix_path)
+        print(f"Matriz de embeddings cargada con forma: {embedding_matrix.shape}")
+    elif use_pretrained_embeddings:
+        print("Generando matriz de embeddings a partir del vocabulario...")
+        # Usar el feature_extractor para crear la matriz
+        embedding_matrix = feature_extractor.create_embedding_matrix()
+        print(f"Matriz de embeddings generada con forma: {embedding_matrix.shape}")
+    else:
+        print("No se usarán embeddings preentrenados")
+    
+    # Inicializar modelo CNN
+    embedding_dim = 300 if use_pretrained_embeddings else 100
+    
     cnn_model = PlagiarismCNN(
         vocab_size=vocab_size,
-        embedding_dim=100,
+        embedding_dim=embedding_dim,
         max_length=max_length,
         filters_per_size=64,
         filter_sizes=[3, 4, 5],
-        dropout_rate=0.5
+        dropout_rate=0.5,
+        use_pretrained=use_pretrained_embeddings,
+        embedding_model=embedding_model,
+        trainable_embeddings=False  # No entrenar embeddings inicialmente
     )
+    
+    # Establecer la matriz de embeddings en el modelo CNN
+    if embedding_matrix is not None and use_pretrained_embeddings:
+        print("Estableciendo matriz de embeddings en el modelo CNN")
+        # Asignar la matriz al atributo
+        cnn_model.embedding_matrix = embedding_matrix
+        
+        # Actualizar los pesos del modelo directamente
+        for layer in cnn_model.model.layers:
+            if layer.name == 'embedding':
+                print(f"Actualizando capa de embedding: {layer.name}")
+                layer.set_weights([embedding_matrix])
+                break
     
     # Definir callbacks para CNN
     early_stopping = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss',
-        patience=3,
+        patience=5,
         restore_best_weights=True
     )
     
+    # Reducir tasa de aprendizaje cuando la mejora se estanca
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=2,
+        min_lr=0.00001
+    )
+    
+    # Guardar mejor modelo
+    model_checkpoint = tf.keras.callbacks.ModelCheckpoint(
+        os.path.join(model_dir, 'best_cnn_model.keras'),
+        monitor='val_loss',
+        save_best_only=True,
+        verbose=1
+    )
     # Entrenar CNN
     history = cnn_model.fit(
         X_cnn_source_train, 
         X_cnn_suspicious_train, 
         y_train,
         validation_split=0.1,
-        batch_size=32,
-        epochs=20,
-        callbacks=[early_stopping]
+        batch_size=64,
+        epochs=100,
+        callbacks=[early_stopping, reduce_lr, model_checkpoint]
     )
     
     # Evaluar CNN
@@ -162,10 +239,14 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models'):
     # Guardar CNN
     cnn_model.save(os.path.join(model_dir, 'cnn_model.keras'))
     
+    # Guardar FeatureExtractor
+    joblib.dump(feature_extractor, os.path.join(model_dir, 'feature_extractor.keras'))
+    
     # Crear y guardar modelo híbrido
     hybrid_model = HybridPlagiarismDetector(
         svm_model=svm_model,
         cnn_model=cnn_model,
+        feature_extractor=feature_extractor,
         ensemble_weights=best_weights
     )
     
@@ -206,6 +287,29 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models'):
     plt.tight_layout()
     plt.savefig(os.path.join(model_dir, 'results.png'))
     
+    # 7. Guardar resultados de análisis por obfuscación
+    obfuscation_results = []
+    for obfuscation_type in metadata_test['obfuscation'].unique():
+        mask = metadata_test['obfuscation'] == obfuscation_type
+        if sum(mask) == 0:
+            continue
+            
+        y_true_subset = metadata_test.loc[mask, 'is_plagiarism'].values
+        y_pred_subset = metadata_test.loc[mask, 'hybrid_pred'].values
+        
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_true_subset, y_pred_subset, average='binary', zero_division=0)
+        
+        obfuscation_results.append({
+            'tipo': obfuscation_type,
+            'ejemplos': sum(mask),
+            'precision': precision,
+            'recall': recall,
+            'f1': f1
+        })
+    
+    pd.DataFrame(obfuscation_results).to_csv(os.path.join(model_dir, 'obfuscation_results.csv'), index=False)
+    
     return {
         'svm_model': svm_model,
         'cnn_model': cnn_model,
@@ -215,11 +319,16 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models'):
             'svm_f1': precision_recall_fscore_support(y_test, y_pred_svm, average='binary')[2],
             'cnn_f1': precision_recall_fscore_support(y_test, y_pred_cnn, average='binary')[2],
             'hybrid_f1': best_f1
-        }
+        },
+        'obfuscation_results': obfuscation_results
     }
 
 if __name__ == "__main__":
-    results = train_and_evaluate()
+    results = train_and_evaluate(
+        use_pretrained_embeddings=True,
+        embedding_model='glove-wiki-gigaword-300',
+        language='english'
+    )
     print("\nEntrenamiento y evaluación completados!")
     print(f"F1-Score SVM: {results['metrics']['svm_f1']:.4f}")
     print(f"F1-Score CNN: {results['metrics']['cnn_f1']:.4f}")

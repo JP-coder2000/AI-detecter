@@ -7,11 +7,14 @@ from typing import Dict, List, Tuple, Any, Union
 
 class PlagiarismCNN:
     def __init__(self, vocab_size: int, 
-                 embedding_dim: int = 100,
+                 embedding_dim: int = 300,
                  max_length: int = 500,
                  filters_per_size: int = 64,
                  filter_sizes: List[int] = [3, 4, 5],
-                 dropout_rate: float = 0.5):
+                 dropout_rate: float = 0.5,
+                 use_pretrained: bool = True,
+                 embedding_model: str = 'glove-wiki-gigaword-300',
+                 trainable_embeddings: bool = False):
         """
         Inicializa el modelo CNN para detección de plagio.
         
@@ -22,6 +25,9 @@ class PlagiarismCNN:
             filters_per_size: Número de filtros por tamaño
             filter_sizes: Lista de tamaños de filtro
             dropout_rate: Tasa de dropout
+            use_pretrained: Si se deben usar embeddings preentrenados
+            embedding_model: Modelo de embeddings a cargar
+            trainable_embeddings: Si los embeddings deben ser entrenables o fijos
         """
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
@@ -29,6 +35,12 @@ class PlagiarismCNN:
         self.filters_per_size = filters_per_size
         self.filter_sizes = filter_sizes
         self.dropout_rate = dropout_rate
+        self.use_pretrained = use_pretrained
+        self.embedding_model = embedding_model
+        self.trainable_embeddings = trainable_embeddings
+        
+        # Matriz de embeddings preentrenados
+        self.embedding_matrix = None
         
         # Construir modelo
         self.model = self._build_model()
@@ -44,13 +56,23 @@ class PlagiarismCNN:
         source_input = Input(shape=(self.max_length,), name='source_input')
         suspicious_input = Input(shape=(self.max_length,), name='suspicious_input')
         
-        # Capa de embedding compartida
-        embedding_layer = Embedding(
-            input_dim=self.vocab_size,
-            output_dim=self.embedding_dim,
-            input_length=self.max_length,
-            name='embedding'
-        )
+        # Capa de embedding (compartida o no según configuración)
+        if self.use_pretrained and self.embedding_matrix is not None:
+            embedding_layer = Embedding(
+                input_dim=self.vocab_size,
+                output_dim=self.embedding_dim,
+                weights=[self.embedding_matrix],
+                input_length=self.max_length,
+                trainable=self.trainable_embeddings,
+                name='embedding'
+            )
+        else:
+            embedding_layer = Embedding(
+                input_dim=self.vocab_size,
+                output_dim=self.embedding_dim,
+                input_length=self.max_length,
+                name='embedding'
+            )
         
         # Embeddings para cada entrada
         source_embedding = embedding_layer(source_input)
@@ -99,7 +121,7 @@ class PlagiarismCNN:
         source_flat = Flatten(name='source_flatten')(source_concat)
         suspicious_flat = Flatten(name='suspicious_flatten')(suspicious_concat)
         
-        # Concatenar representaciones de ambos textos
+        # Concatenar representaciones de ambos textos (sin atención para evitar error)
         concat = Concatenate(axis=1, name='concat')([source_flat, suspicious_flat])
         
         # Capas densas
@@ -118,7 +140,7 @@ class PlagiarismCNN:
         model.compile(
             optimizer='adam',
             loss='binary_crossentropy',
-            metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
+            metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), tf.keras.metrics.AUC()]
         )
         
         return model
