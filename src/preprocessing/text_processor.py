@@ -28,9 +28,9 @@ class TextProcessor:
         Args:
             language: Idioma para stopwords y lematización ('english', 'german', 'spanish')
         """
-        self.language = language
-        self.stemmer = PorterStemmer()
-        self.lemmatizer = WordNetLemmatizer()
+        self.language = language # Cargamos el idioma
+        self.stemmer = PorterStemmer() # Este sirve para que en dado caso de que hayan palabras con raíces similares, como correr, corrida, correo, lo deje en corr. (Este lo tengo desactivado por defecto, solo lo implementé para ver que tal funcionaba el modelo)
+        self.lemmatizer = WordNetLemmatizer() # Este sirve para volver las palabras que estan conjugadas a su raíz, como por ejemplo: corriendo -> correr, corrí -> correr, etc. (Este lo tengo activado por defecto)
         
         # Stopwords según el idioma
         self.stop_words = set()
@@ -98,47 +98,3 @@ class TextProcessor:
             'processed_sentences': processed_sentences,
             'n_sentences': len(sentences)
         }
-    
-    def generate_ngrams(self, tokens: List[str], n: int) -> List[str]:
-        """
-        Genera n-gramas a partir de una lista de tokens.
-        
-        Args:
-            tokens: Lista de tokens
-            n: Tamaño del n-grama
-            
-        Returns:
-            Lista de n-gramas
-        """
-        ngrams = []
-        for i in range(len(tokens) - n + 1):
-            ngram = ' '.join(tokens[i:i+n])
-            ngrams.append(ngram)
-        return ngrams
-    
-    def get_character_ngrams(self, text: str, n: int) -> List[str]:
-        """
-        Genera n-gramas a nivel de caracteres.
-        
-        Args:
-            text: Texto de entrada
-            n: Tamaño del n-grama
-            
-        Returns:
-            Lista de n-gramas de caracteres
-        """
-        return [text[i:i+n] for i in range(len(text) - n + 1)]
-    
-    def get_token_ngrams(self, text: str, n: int) -> List[str]:
-        """
-        Genera n-gramas a nivel de tokens.
-        
-        Args:
-            text: Texto de entrada
-            n: Tamaño del n-grama
-            
-        Returns:
-            Lista de n-gramas de tokens
-        """
-        tokens = word_tokenize(text)
-        return self.generate_ngrams(tokens, n)
