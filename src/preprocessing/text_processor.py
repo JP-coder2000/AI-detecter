@@ -7,7 +7,7 @@ from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from typing import List, Dict, Any, Union
 
-# Solución para el problema de SSL en macOS
+# Configuración para evitar problemas de SSL en algunos entornos (Me pasaba mucho a mi JP, encontré que así lo podía solucionar)
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:

@@ -12,7 +12,7 @@ from models.cnn_model import PlagiarismCNN
 from integration.hybrid_model import HybridPlagiarismDetector
 from features.feature_extractor import FeatureExtractor
 
-def train_and_evaluate(data_dir='data/processed', model_dir='models',
+def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
                       use_pretrained_embeddings=True,
                       embedding_model='glove-wiki-gigaword-300',
                       language='english'):
@@ -159,7 +159,7 @@ def train_and_evaluate(data_dir='data/processed', model_dir='models',
         y_train,
         validation_split=0.1,
         batch_size=64,
-        epochs=100,
+        epochs=50,
         callbacks=[early_stopping, reduce_lr, model_checkpoint]
     )
     

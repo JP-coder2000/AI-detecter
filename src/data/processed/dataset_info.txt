@@ -1,0 +1,20 @@
+Total examples: 86842
+Positive examples: 49620
+Negative examples: 37222
+SVM features dimension: 741215
+CNN sequence length: 500
+Language: english
+Pretrained embeddings: True
+Embedding model: glove-wiki-gigaword-300
+
+=== Distribution by obfuscation type ===
+low: 19779 examples (22.8%)
+high: 19115 examples (22.0%)
+unknown: 9750 examples (11.2%)
+none: 38198 examples (44.0%)
+
+=== Distribution of negative examples by similarity range ===
+muy_bajo: 12405 examples (33.3%)
+bajo: 12405 examples (33.3%)
+medio: 12405 examples (33.3%)
+alto: 7 examples (0.0%)
