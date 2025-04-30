@@ -14,7 +14,7 @@ class PanCorpusLoader:
         self.external_corpus_path = os.path.join(corpus_path, "external-detection-corpus")
         self.intrinsic_corpus_path = os.path.join(corpus_path, "intrinsic-detection-corpus")
     
-    def _list_parts(self, base_dir: str) -> List[str]:
+    def _list_parts(self, base_dir: str) -> List[str]: ## Estos son los directorios de part1 hasta la 23
         """Lista todos los directorios part* en la ruta especificada"""
         if not os.path.exists(base_dir):
             print(f"Advertencia: Directorio no encontrado: {base_dir}")
