@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import seaborn as sns
 from tqdm import tqdm
 import joblib
 
@@ -11,6 +12,78 @@ from models.svm_model import PlagiarismSVM
 from models.cnn_model import PlagiarismCNN
 from integration.hybrid_model import HybridPlagiarismDetector
 from features.feature_extractor import FeatureExtractor
+from preprocessing.text_processor import TextProcessor
+
+def create_enhanced_visualizations(y_test, best_predictions, svm_proba, cnn_proba, hybrid_proba, 
+                                  history, metadata_test, output_dir):
+    """
+    Genera visualizaciones mejoradas para los resultados del modelo.
+    
+    Args:
+        y_test: Etiquetas verdaderas
+        best_predictions: Predicciones del modelo híbrido
+        svm_proba: Probabilidades de SVM
+        cnn_proba: Probabilidades de CNN
+        hybrid_proba: Probabilidades del modelo híbrido
+        history: Historial de entrenamiento de CNN
+        metadata_test: Metadatos del conjunto de prueba
+        output_dir: Directorio donde guardar las gráficas
+    """
+    # Asegurarse de que el directorio existe
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Configuración de estilo
+    plt.style.use('default')
+    colors = {'svm': '#1f77b4', 'cnn': '#ff7f0e', 'hybrid': '#2ca02c'}
+    
+    # 1. Matriz de confusión
+    plt.figure(figsize=(10, 8))
+    cm = confusion_matrix(y_test, best_predictions)
+    
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
+    plt.title('Matriz de Confusión - Modelo Híbrido', fontsize=16)
+    plt.ylabel('Etiqueta Real', fontsize=14)
+    plt.xlabel('Etiqueta Predicha', fontsize=14)
+    plt.xticks([0.5, 1.5], ['No Plagio', 'Plagio'], fontsize=12)
+    plt.yticks([0.5, 1.5], ['No Plagio', 'Plagio'], fontsize=12, rotation=0)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'), dpi=300)
+    
+    # 2. Curvas de aprendizaje - siempre empezando desde 0
+    if hasattr(history, 'history'):
+        plt.figure(figsize=(12, 10))
+        
+        # 2.1 Precisión
+        plt.subplot(2, 1, 1)
+        plt.plot(history.history['accuracy'], label='Entrenamiento', color=colors['cnn'], linewidth=2)
+        if 'val_accuracy' in history.history:
+            plt.plot(history.history['val_accuracy'], label='Validación', 
+                    color=colors['hybrid'], linewidth=2, linestyle='--')
+        
+        plt.title('Precisión durante Entrenamiento', fontsize=16)
+        plt.ylabel('Precisión', fontsize=14)
+        plt.xlabel('Época', fontsize=14)
+        plt.ylim(0, 1.0)  # Forzar inicio desde 0
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend(fontsize=12)
+        
+        # 2.2 Pérdida
+        plt.subplot(2, 1, 2)
+        plt.plot(history.history['loss'], label='Entrenamiento', color=colors['cnn'], linewidth=2)
+        if 'val_loss' in history.history:
+            plt.plot(history.history['val_loss'], label='Validación', 
+                    color=colors['hybrid'], linewidth=2, linestyle='--')
+        
+        plt.title('Pérdida durante Entrenamiento', fontsize=16)
+        plt.ylabel('Pérdida', fontsize=14)
+        plt.xlabel('Época', fontsize=14)
+        plt.ylim(0, max(history.history['loss'])*1.1)  # Escala dinámica pero desde 0
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend(fontsize=12)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'learning_curves.png'), dpi=300)
 
 def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
                       use_pretrained_embeddings=True,
@@ -26,20 +99,34 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
         embedding_model: Modelo de embeddings a utilizar
         language: Idioma del modelo
     """
-    print("Cargando datos...")
-    X_svm_train = np.load(os.path.join(data_dir, 'X_svm_train.npy'))
-    X_cnn_source_train = np.load(os.path.join(data_dir, 'X_cnn_source_train.npy'))
-    X_cnn_suspicious_train = np.load(os.path.join(data_dir, 'X_cnn_suspicious_train.npy'))
-    y_train = np.load(os.path.join(data_dir, 'y_train.npy'))
+    print(f"Cargando datos desde {data_dir}...")
     
-    X_svm_test = np.load(os.path.join(data_dir, 'X_svm_test.npy'))
-    X_cnn_source_test = np.load(os.path.join(data_dir, 'X_cnn_source_test.npy'))
-    X_cnn_suspicious_test = np.load(os.path.join(data_dir, 'X_cnn_suspicious_test.npy'))
-    y_test = np.load(os.path.join(data_dir, 'y_test.npy'))
+    # Verificar que el directorio existe
+    if not os.path.exists(data_dir):
+        print(f"ERROR: El directorio {data_dir} no existe")
+        return None
     
-    metadata_test = pd.read_csv(os.path.join(data_dir, 'metadata_test.csv'))
+    # Cargar datos
+    try:
+        X_svm_train = np.load(os.path.join(data_dir, 'X_svm_train.npy'))
+        X_cnn_source_train = np.load(os.path.join(data_dir, 'X_cnn_source_train.npy'))
+        X_cnn_suspicious_train = np.load(os.path.join(data_dir, 'X_cnn_suspicious_train.npy'))
+        y_train = np.load(os.path.join(data_dir, 'y_train.npy'))
+        
+        X_svm_test = np.load(os.path.join(data_dir, 'X_svm_test.npy'))
+        X_cnn_source_test = np.load(os.path.join(data_dir, 'X_cnn_source_test.npy'))
+        X_cnn_suspicious_test = np.load(os.path.join(data_dir, 'X_cnn_suspicious_test.npy'))
+        y_test = np.load(os.path.join(data_dir, 'y_test.npy'))
+        
+        metadata_test = pd.read_csv(os.path.join(data_dir, 'metadata_test.csv'))
+    except Exception as e:
+        print(f"ERROR al cargar los datos: {e}")
+        return None
     
     print(f"Datos cargados: {len(y_train)} ejemplos de entrenamiento, {len(y_test)} de prueba")
+    
+    # Cargar procesador de texto
+    text_processor = TextProcessor(language=language)
     
     # Cargar vocabulario y feature_extractor
     vocab_path = os.path.join(data_dir, 'vocabulary.pkl')
@@ -152,6 +239,7 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
         save_best_only=True,
         verbose=1
     )
+    
     # Entrenar CNN
     history = cnn_model.fit(
         X_cnn_source_train, 
@@ -184,6 +272,7 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
     best_f1 = 0
     best_weights = None
     best_predictions = None
+    best_hybrid_proba = None
     
     for w_svm, w_cnn in weight_combinations:
         # Combinar predicciones
@@ -201,6 +290,7 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
             best_f1 = f1
             best_weights = (w_svm, w_cnn)
             best_predictions = hybrid_pred
+            best_hybrid_proba = hybrid_proba
     
     print(f"\nMejores pesos: SVM={best_weights[0]}, CNN={best_weights[1]}")
     print("\nInforme de clasificación híbrido (mejores pesos):")
@@ -215,79 +305,6 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
     metadata_test['hybrid_pred'] = best_predictions
     
     # Agrupar por tipo de obfuscación
-    for obfuscation_type in metadata_test['obfuscation'].unique():
-        mask = metadata_test['obfuscation'] == obfuscation_type
-        if sum(mask) == 0:
-            continue
-            
-        y_true_subset = metadata_test.loc[mask, 'is_plagiarism'].values
-        y_pred_subset = metadata_test.loc[mask, 'hybrid_pred'].values
-        
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y_true_subset, y_pred_subset, average='binary', zero_division=0)
-        
-        print(f"\nTipo de obfuscación: {obfuscation_type}")
-        print(f"Ejemplos: {sum(mask)}")
-        print(f"Precisión: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
-    
-    # 5. Guardar modelos
-    print("\n--- Guardando modelos ---")
-    
-    # Guardar SVM
-    joblib.dump(svm_model, os.path.join(model_dir, 'svm_model.keras'))
-    
-    # Guardar CNN
-    cnn_model.save(os.path.join(model_dir, 'cnn_model.keras'))
-    
-    # Guardar FeatureExtractor
-    joblib.dump(feature_extractor, os.path.join(model_dir, 'feature_extractor.keras'))
-    
-    # Crear y guardar modelo híbrido
-    hybrid_model = HybridPlagiarismDetector(
-        svm_model=svm_model,
-        cnn_model=cnn_model,
-        feature_extractor=feature_extractor,
-        ensemble_weights=best_weights
-    )
-    
-    hybrid_model.save(os.path.join(model_dir, 'hybrid_model'))
-    
-    print(f"\nModelos guardados en {model_dir}")
-    
-    # 6. Visualizar resultados
-    plt.figure(figsize=(12, 5))
-    
-    # Matriz de confusión para el modelo híbrido
-    plt.subplot(1, 2, 1)
-    cm = confusion_matrix(y_test, best_predictions)
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title('Matriz de confusión (Híbrido)')
-    plt.colorbar()
-    plt.xticks([0, 1], ['No plagio', 'Plagio'])
-    plt.yticks([0, 1], ['No plagio', 'Plagio'])
-    plt.xlabel('Predicción')
-    plt.ylabel('Verdadero')
-    
-    # Añadir valores numéricos
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            plt.text(j, i, str(cm[i, j]), horizontalalignment="center", color="white" if cm[i, j] > cm.max() / 2 else "black")
-    
-    # Curvas históricas de la CNN si hay historia
-    if hasattr(history, 'history'):
-        plt.subplot(1, 2, 2)
-        plt.plot(history.history['accuracy'], label='train_accuracy')
-        if 'val_accuracy' in history.history:
-            plt.plot(history.history['val_accuracy'], label='val_accuracy')
-        plt.title('Precisión durante entrenamiento')
-        plt.xlabel('Época')
-        plt.ylabel('Precisión')
-        plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(model_dir, 'results.png'))
-    
-    # 7. Guardar resultados de análisis por obfuscación
     obfuscation_results = []
     for obfuscation_type in metadata_test['obfuscation'].unique():
         mask = metadata_test['obfuscation'] == obfuscation_type
@@ -307,7 +324,54 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
             'recall': recall,
             'f1': f1
         })
+        
+        print(f"\nTipo de obfuscación: {obfuscation_type}")
+        print(f"Ejemplos: {sum(mask)}")
+        print(f"Precisión: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
     
+    # 5. Guardar modelos
+    print("\n--- Guardando modelos ---")
+    
+    # Guardar SVM
+    joblib.dump(svm_model, os.path.join(model_dir, 'svm_model.keras'))
+    
+    # Guardar CNN
+    cnn_model.save(os.path.join(model_dir, 'cnn_model.keras'))
+    
+    # Guardar FeatureExtractor
+    joblib.dump(feature_extractor, os.path.join(model_dir, 'feature_extractor.keras'))
+    
+    # Guardar TextProcessor
+    joblib.dump(text_processor, os.path.join(model_dir, 'text_processor.keras'))
+    
+    # Crear y guardar modelo híbrido
+    hybrid_model = HybridPlagiarismDetector(
+        svm_model=svm_model,
+        cnn_model=cnn_model,
+        feature_extractor=feature_extractor,
+        text_processor=text_processor,
+        ensemble_weights=best_weights,
+        language=language
+    )
+    
+    hybrid_model.save(os.path.join(model_dir, 'hybrid_model'))
+    
+    print(f"\nModelos guardados en {model_dir}")
+    
+    # 6. Generar visualizaciones mejoradas
+    print("\n--- Generando visualizaciones ---")
+    create_enhanced_visualizations(
+        y_test=y_test,
+        best_predictions=best_predictions,
+        svm_proba=svm_proba,
+        cnn_proba=y_pred_cnn_prob.flatten(),
+        hybrid_proba=best_hybrid_proba,
+        history=history,
+        metadata_test=metadata_test,
+        output_dir=model_dir
+    )
+    
+    # 7. Guardar resultados de análisis por obfuscación
     pd.DataFrame(obfuscation_results).to_csv(os.path.join(model_dir, 'obfuscation_results.csv'), index=False)
     
     return {
@@ -324,12 +388,57 @@ def train_and_evaluate(data_dir='src/data/processed', model_dir='models',
     }
 
 if __name__ == "__main__":
+    # Configuración de rutas
+    import sys
+    
+    # Directorio base del proyecto
+    project_dir = os.getcwd()
+    print(f"Directorio del proyecto: {project_dir}")
+    
+    # Ruta correcta a los datos
+    data_dir = os.path.join(project_dir, 'src', 'data', 'processed')
+    print(f"Buscando datos en: {data_dir}")
+    
+    # Verificar que existe
+    if not os.path.exists(data_dir):
+        print(f"ERROR: No se encontró el directorio {data_dir}")
+        print("Directorios disponibles en src:")
+        if os.path.exists('src'):
+            print(os.listdir('src'))
+        else:
+            print("El directorio src no existe en el directorio actual")
+        sys.exit(1)
+    
+    # Directorio para guardar modelos
+    model_dir = os.path.join(project_dir, 'models')
+    os.makedirs(model_dir, exist_ok=True)
+    
+    print(f"\nConfiguración:")
+    print(f"  - Directorio de datos: {data_dir}")
+    print(f"  - Directorio de modelos: {model_dir}")
+    print("")
+    
+    # Ejecutar entrenamiento
     results = train_and_evaluate(
+        data_dir=data_dir,
+        model_dir=model_dir,
         use_pretrained_embeddings=True,
         embedding_model='glove-wiki-gigaword-300',
         language='english'
     )
-    print("\nEntrenamiento y evaluación completados!")
-    print(f"F1-Score SVM: {results['metrics']['svm_f1']:.4f}")
-    print(f"F1-Score CNN: {results['metrics']['cnn_f1']:.4f}")
-    print(f"F1-Score Híbrido: {results['metrics']['hybrid_f1']:.4f}")
+    
+    if results:
+        print("\n=== RESUMEN DE RESULTADOS ===")
+        print(f"Métricas SVM: F1-Score = {results['metrics']['svm_f1']:.4f}")
+        print(f"Métricas CNN: F1-Score = {results['metrics']['cnn_f1']:.4f}")
+        print(f"Métricas Modelo Híbrido: F1-Score = {results['metrics']['hybrid_f1']:.4f}")
+        print(f"Mejores pesos: SVM={results['best_weights'][0]}, CNN={results['best_weights'][1]}")
+        
+        print("\nResultados por tipo de obfuscación:")
+        for result in results['obfuscation_results']:
+            print(f"  - {result['tipo']}: F1={result['f1']:.4f} (n={result['ejemplos']})")
+        
+        print(f"\nVisualización de resultados guardada en: {model_dir}")
+        print("Entrenamiento y evaluación completados con éxito!")
+    else:
+        print("\nERROR: El entrenamiento no se completó correctamente.")
